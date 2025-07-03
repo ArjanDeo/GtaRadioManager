@@ -2,118 +2,171 @@ import os
 import shutil
 import json
 import subprocess
+import threading
+import customtkinter as ctk
+from tkinter import filedialog, messagebox, Listbox, END
 from ytmusicapi import YTMusic
 from yt_dlp import YoutubeDL
 from mutagen.mp4 import MP4
 
-settings_file = 'settings.json'
+settings_file = "settings.json"
 
-def check_settings_file():
-    if not os.path.exists(settings_file):
-        print("Settings file not found.")
-        user_music_folder = input("Please enter the path to your GTA user music folder (If not using GTA, enter path to wanted destination folder): ")
-        
-        if user_music_folder == "":
-            print('No GTA User Music / Destination folder selected. Skipping.')
-        elif not os.path.isdir(user_music_folder):
-            print("The provided path is not valid. Please check the folder path.")
-            return None
-        
-        audio_quality = input('Enter preferred audio quality (1) High (best quality), (2) Medium (lower quality), or press enter for default: ')
-        if audio_quality == '1':
-            quality = 'bestaudio/best'
-        elif audio_quality == '2':
-            quality = 'bestaudio'
-        else:
-            quality = 'm4a/bestaudio/best'
+class GTARadioManager(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("GTA Radio Manager")
+        self.geometry("800x600")
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
 
-        gta_mode = input("(1) Tag audio files for GTA\n(2) Tag audio files normally\n(Default is 1)")
-        if gta_mode == '1':
-            gta = True
-        elif gta_mode == '2':
-            gta = False
-        else:
-            gta = True
+        self.ytmusic = YTMusic()
+        self.search_results = []
+        self.audio_quality = ctk.StringVar(value="m4a/bestaudio/best")
+        self.gta_mode = True
+        self.gta_music_folder = None
 
-        settings = {"gta_music_folder": user_music_folder, "audio_quality": quality, 'gta_mode': gta}
-        with open(settings_file, 'w') as f:
-            json.dump(settings, f, indent=4)
-        
-        print(f"Settings file created with GTA music folder: {user_music_folder}, audio quality: {quality} and {gta} for GTA mode.")
-        return user_music_folder, quality
-    else:
-        with open(settings_file, 'r') as f:
-            settings = json.load(f)
-        return settings.get("gta_music_folder"), settings.get("audio_quality"), settings.get("gta_mode")
+        self.create_widgets()
+        self.load_settings()
 
-def install_ffmpeg():
-    try:
-        subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except FileNotFoundError:
-        print("FFmpeg not found. Please install FFmpeg to continue. (see readme)")
-        print("FFmpeg installed successfully.")
+    def create_widgets(self):
+        ctk.CTkLabel(self, text="Song Title:", font=("Segoe UI", 16)).pack(pady=(20, 5))
+        self.song_entry = ctk.CTkEntry(self, width=500)
+        self.song_entry.pack(pady=5)
 
-def searchForSong(song_name, artist_name):
-    ytmusic = YTMusic()
-    query = f"{song_name} - {artist_name}"
-    results = ytmusic.search(query=query, filter='songs', limit=10)
-    return results
+        ctk.CTkLabel(self, text="Artist Name:", font=("Segoe UI", 16)).pack(pady=5)
+        self.artist_entry = ctk.CTkEntry(self, width=500)
+        self.artist_entry.pack(pady=5)
 
-def main():
-    install_ffmpeg()
-    
-    music_folder, audio_quality, gta_mode = check_settings_file()
-    if not music_folder:
-        return
-    while True:
-        userSongTitle = input('Enter song name: ')
-        userArtistName = input('Enter artist name (press enter to skip): ')
-        
-        results = searchForSong(userSongTitle, userArtistName)
-        if not results:
-            print("No results found. Try refining your search.")
+        ctk.CTkButton(self, text="Search", command=self.search_song).pack(pady=10)
+
+        # Frame to hold styled listbox
+        listbox_frame = ctk.CTkFrame(self, fg_color="transparent")
+        listbox_frame.pack(pady=10)
+
+        self.result_listbox = Listbox(
+            listbox_frame,
+            width=100,
+            height=10,
+            font=("Segoe UI", 12),
+            bg="#1e1e1e",
+            fg="#ffffff",
+            selectbackground="#0078d7",
+            border=0,
+            highlightthickness=0,
+        )
+        self.result_listbox.pack()
+
+        ctk.CTkButton(self, text="Download Selected Song", command=self.download_song).pack(pady=10)
+        ctk.CTkButton(self, text="Select Music Folder", command=self.select_folder).pack(pady=5)
+
+        self.folder_label = ctk.CTkLabel(self, text="", font=("Segoe UI", 14))
+        self.folder_label.pack(pady=5)
+
+        self.output = ctk.CTkTextbox(self, height=100, width=750)
+        self.output.pack(pady=10)
+
+    def log(self, message):
+        self.output.insert("end", message + "\n")
+        self.output.see("end")
+
+    def select_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.gta_music_folder = folder
+            self.folder_label.configure(text=f"Selected folder: {folder}")
+            self.save_settings()
+
+    def search_song(self):
+        song_name = self.song_entry.get()
+        artist_name = self.artist_entry.get()
+        if not song_name:
+            messagebox.showwarning("Missing Input", "Please enter a song name.")
             return
-        
-        index = 0
-        artists = ''
-        for result in results:
-            artists = ", ".join(artist['name'] for artist in result.get('artists', []))
-            index += 1
-            print(f"({index}) {result['title']} - {artists}")
-        
-        choice = int(input('Select a song to download (e.g. 1, 2, 3 etc): ')) - 1
-        artists = ", ".join(artist['name'] for artist in results[choice].get('artists', []))
-        
-        songUrl = f"https://youtube.com/watch?v={results[choice]['videoId']}"
+
+        self.log("Searching...")
+        results = self.ytmusic.search(
+            f"{song_name} - {artist_name}" if artist_name else song_name,
+            filter="songs",
+            limit=10,
+        )
+
+        self.search_results = results
+        self.result_listbox.delete(0, END)
+        for i, result in enumerate(results, 1):
+            artists = ", ".join(artist["name"] for artist in result.get("artists", []))
+            self.result_listbox.insert(END, f"{i}. {result['title']} - {artists}")
+
+    def download_song(self):
+        selection = self.result_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a song from the list.")
+            return
+
+        index = selection[0]
+        result = self.search_results[index]
+        video_id = result.get("videoId")
+        artists = ", ".join(artist["name"] for artist in result.get("artists", []))
+        song_url = f"https://youtube.com/watch?v={video_id}"
+        output_filename = f"{result['title']} - {artists}".replace('"', '_').replace("'", '_')
 
         ydl_opts = {
-            'format': audio_quality,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-            }],
-            'outtmpl': f"{results[choice]['title']} - {artists}",
-            'quiet': True
+            "format": self.audio_quality.get(),
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                }
+            ],
+            "outtmpl": output_filename,
+            "quiet": True,
         }
-        
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([songUrl])
-        
-        sanitized_title = results[choice]['title'].replace('"', '_').replace("'", '_')
-        sanitized_artists = artists.replace('"', '_').replace("'", '_')
-        file_path = f"{sanitized_title} - {sanitized_artists}.m4a"
 
-        audio = MP4(file_path)
-        audio["\xa9nam"] = results[choice]['title']
-        if (gta_mode):
-            audio["\xa9ART"] = artists.upper()
-        else:
-            audio["\xa9ART"] = artists
-        audio.save()
-        print('Successfully changed audio metadata.')
+        def download_thread():
+            try:
+                self.log(f"Downloading: {result['title']} by {artists}")
+                with YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([song_url])
 
-        shutil.move(file_path, f"{music_folder}/{file_path}")
-        print(f"Song successfully saved in {music_folder}.")
+                file_path = f"{output_filename}.m4a"
+                audio = MP4(file_path)
+                audio["\xa9nam"] = result["title"]
+                audio["\xa9ART"] = artists.upper() if self.gta_mode else artists
+                audio.save()
 
-if __name__ == '__main__':
-    main()
+                if self.gta_music_folder:
+                    shutil.move(file_path, os.path.join(self.gta_music_folder, file_path))
+                    self.log(f"Downloaded '{output_filename}' to {self.gta_music_folder}")
+                else:
+                    self.log(f"Saved as {file_path}")
+
+                messagebox.showinfo("Done", "Song downloaded successfully.")
+
+            except Exception as e:
+                self.log(f"Error: {e}")
+                messagebox.showerror("Error", str(e))
+
+        threading.Thread(target=download_thread).start()
+
+    def load_settings(self):
+        if os.path.exists(settings_file):
+            with open(settings_file, "r") as f:
+                settings = json.load(f)
+            self.gta_music_folder = settings.get("gta_music_folder")
+            self.audio_quality.set(settings.get("audio_quality", "m4a/bestaudio/best"))
+            self.gta_mode = settings.get("gta_mode", True)
+            if self.gta_music_folder:
+                self.folder_label.configure(text=f"Selected folder: {self.gta_music_folder}")
+
+    def save_settings(self):
+        settings = {
+            "gta_music_folder": self.gta_music_folder,
+            "audio_quality": self.audio_quality.get(),
+            "gta_mode": self.gta_mode,
+        }
+        with open(settings_file, "w") as f:
+            json.dump(settings, f, indent=4)
+
+
+if __name__ == "__main__":
+    app = GTARadioManager()
+    app.mainloop()
