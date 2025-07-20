@@ -23,6 +23,6 @@
 
 1. **Clone or download this repository**  
 ```bash
-git clone https://github.com/yourusername/gtaradiomanager.git
+git clone https://github.com/arjandeo/gtaradiomanager.git
 cd gtaudio-downloader
 pip install -r requirements.txt
