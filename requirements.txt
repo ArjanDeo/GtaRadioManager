@@ -1,5 +1,4 @@
 ytmusicapi
 yt_dlp
 mutagen
-tkinter
 customtkinter

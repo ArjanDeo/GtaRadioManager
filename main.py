@@ -56,7 +56,7 @@ class GTARadioManager(ctk.CTk):
         )
         self.result_listbox.pack()
 
-        ctk.CTkButton(self, text="Download Selected Song", command=self.download_song).pack(pady=10)
+        ctk.CTkButton(self, text="Download Song", command=self.download_song).pack(pady=10)
         ctk.CTkButton(self, text="Select Music Folder", command=self.select_folder).pack(pady=5)
 
         self.folder_label = ctk.CTkLabel(self, text="", font=("Segoe UI", 14))
